@@ -1,0 +1,80 @@
+# Node.js Express Web App to Linux on Azure
+# Build a Node.js Express app and deploy it to Azure as a Linux web app.
+# Add steps that analyze code, save build artifacts, deploy, and more:
+# https://docs.microsoft.com/azure/devops/pipelines/languages/javascript
+
+
+# App Service 용
+trigger:
+- master
+
+variables:
+
+  # Azure Resource Manager connection created during pipeline creation
+  azureSubscription: 'eb23184e-e591-419c-8ec4-35b2154da4ad'
+
+  # Web app name
+  webAppName: 'hh3-tier'
+
+  # Environment name
+  environmentName: 'hh3-tier'
+
+  # Agent VM image name
+  vmImageName: 'ubuntu-latest'
+
+stages:
+- stage: Build
+  displayName: Build stage
+  jobs:
+  - job: Build
+    displayName: Build
+    pool:
+      vmImage: $(vmImageName)
+
+    steps:
+    - task: NodeTool@0
+      inputs:
+        versionSpec: '10.x'
+      displayName: 'Install Node.js'
+
+    - script: |
+        npm install
+        npm run build --if-present
+        npm run test --if-present
+      displayName: 'npm install, build and test'
+
+    - task: ArchiveFiles@2
+      displayName: 'Archive files'
+      inputs:
+        rootFolderOrFile: '$(System.DefaultWorkingDirectory)/dist'
+        includeRootFolder: false
+        archiveType: zip
+        archiveFile: $(Build.ArtifactStagingDirectory)/$(Build.BuildId).zip
+        replaceExistingArchive: true
+
+    - upload: $(Build.ArtifactStagingDirectory)/$(Build.BuildId).zip
+      artifact: drop
+
+- stage: Deploy
+  displayName: Deploy stage
+  dependsOn: Build
+  condition: succeeded()
+  jobs:
+  - deployment: Deploy
+    displayName: Deploy
+    environment: $(environmentName)
+    pool:
+      vmImage: $(vmImageName)
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - task: AzureWebApp@1
+            displayName: 'Azure Web App Deploy: hh3-tier'
+            inputs:
+              azureSubscription: $(azureSubscription)
+              appType: webAppLinux
+              appName: $(webAppName)
+              runtimeStack: 'NODE|10.10'
+              package: $(Pipeline.Workspace)/drop/$(Build.BuildId).zip
+              startUpCommand: 'pm2 serve /home/site/wwwroot --no-daemon --spa'
